@@ -63,9 +63,12 @@ class GeneralModelResnet(nn.Module):
         super().__init__()
         self.in_planes = 72
         self.layer1 = self._make_layer(BasicBlockM, 72, 3, stride=2)  # 1*27*72
-        self.layer2 = self._make_layer(BasicBlockM, 144, 3, stride=2)  # 1*14*146
-        self.layer3 = self._make_layer(BasicBlockM, 288, 3, stride=2)  # 1*7*292
-        self.linear1 = nn.Linear(288 * BasicBlockM.expansion * 7 + 18 * 4, 2048)
+        self.layer2 = self._make_layer(
+            BasicBlockM, 144, 3, stride=2)  # 1*14*146
+        self.layer3 = self._make_layer(
+            BasicBlockM, 288, 3, stride=2)  # 1*7*292
+        self.linear1 = nn.Linear(
+            288 * BasicBlockM.expansion * 7 + 18 * 4, 2048)
         self.linear2 = nn.Linear(2048, 512)
         self.linear3 = nn.Linear(512, 128)
         self.linear4 = nn.Linear(128, 3)
@@ -153,7 +156,8 @@ class PositionalEncoding(nn.Module):
         super(PositionalEncoding, self).__init__()
         self.pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * -(math.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(
+            0, d_model, 2).float() * -(math.log(10000.0) / d_model))
         self.pe[:, 0::2] = torch.sin(position * div_term)
         self.pe[:, 1::2] = torch.cos(position * div_term)
         self.pe = self.pe.unsqueeze(0)
@@ -177,11 +181,14 @@ class GeneralModelTransformer(nn.Module):
         self.pos_encoder = PositionalEncoding(d_model, max_len=60)
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead,
                                                         dim_feedforward=758, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_encoder_layers)
-        self.conv = nn.Conv1d(60, 4, kernel_size=3, stride=1, padding=1, bias=False)
+        self.transformer_encoder = nn.TransformerEncoder(
+            self.encoder_layer, num_layers=num_encoder_layers)
+        self.conv = nn.Conv1d(60, 4, kernel_size=3,
+                              stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm1d(4)
 
-        self.linear1 = nn.Linear(d_model * 4 + 18 * 2 + 48 * BasicBlockM.expansion * 7, 1024)
+        self.linear1 = nn.Linear(
+            d_model * 4 + 18 * 2 + 48 * BasicBlockM.expansion * 7, 1024)
         self.linear2 = nn.Linear(1024, 512)
         self.linear3 = nn.Linear(512, 128)
         self.linear4 = nn.Linear(128, 3)
@@ -247,17 +254,18 @@ class Model:
     The wrapper for the three models. We also wrap several
     interfaces such as share_memory, eval, etc.
     """
+
     def __init__(self, device=0):
-        if not device == "cpu":
-            device = 'cuda:' + str(device)
+        from .device_utils import get_torch_device
+        torch_device = get_torch_device(device)
 
         self.models = {
-            'first': GeneralModelBid().to(torch.device(device)),
-            'second': GeneralModelBid().to(torch.device(device)),
-            'third': GeneralModelBid().to(torch.device(device)),
-            'landlord': GeneralModelResnet().to(torch.device(device)),
-            'landlord_down': GeneralModelResnet().to(torch.device(device)),
-            'landlord_up': GeneralModelResnet().to(torch.device(device)),
+            'first': GeneralModelBid().to(torch_device),
+            'second': GeneralModelBid().to(torch_device),
+            'third': GeneralModelBid().to(torch_device),
+            'landlord': GeneralModelResnet().to(torch_device),
+            'landlord_down': GeneralModelResnet().to(torch_device),
+            'landlord_up': GeneralModelResnet().to(torch_device),
         }
 
     def forward(self, position, z, x, training=False, flags=None, debug=False):
@@ -363,6 +371,5 @@ class FarmerLstmModel(nn.Module):
 
 
 # Model dict is only used in evaluation but not training
-model_dict_douzero = {'landlord': LandlordLstmModel, 'landlord_up': FarmerLstmModel, 'landlord_down': FarmerLstmModel}
-
-
+model_dict_douzero = {'landlord': LandlordLstmModel,
+                      'landlord_up': FarmerLstmModel, 'landlord_down': FarmerLstmModel}

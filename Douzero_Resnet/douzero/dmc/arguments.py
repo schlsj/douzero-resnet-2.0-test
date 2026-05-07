@@ -6,7 +6,7 @@ parser = argparse.ArgumentParser(description='DouZero: PyTorch DouDizhu AI')
 parser.add_argument('--xpid', default='douzero_II',
                     help='Experiment id (default: douzero_II)')
 parser.add_argument('--save_interval', default=10, type=int,
-                    help='Time interval (in minutes) at which to save the model')    
+                    help='Time interval (in minutes) at which to save the model')
 parser.add_argument('--objective', default='adp', type=str, choices=['adp'],
                     help='Use ADP as reward (default: ADP)')
 
@@ -20,7 +20,8 @@ parser.add_argument('--num_actor_devices', default=1, type=int,
 parser.add_argument('--num_actors', default=4, type=int,
                     help='The number of actors for each simulation device')
 parser.add_argument('--training_device', default='0', type=str,
-                    help='The index of the GPU used for training models. `cpu` means using cpu')
+                    help='The device used for training models. `cpu` means using CPU, `tpu` means using TPU, '
+                         '`0`,`1`,... means GPU index. (default: 0)')
 parser.add_argument('--load_model', action='store_true',
                     help='Load an existing model')
 parser.add_argument('--disable_checkpoint', action='store_true',

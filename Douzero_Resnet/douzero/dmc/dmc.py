@@ -36,11 +36,14 @@ def compute_loss_bid(logits, targets):
 
 def learn(position, actor_models, model, batch, optimizer, flags, lock):
     """Performs a learning (optimization) step."""
+    from .device_utils import get_torch_device
+    try:
+        import torch_xla.core.xla_model as xm
+        HAS_XLA = True
+    except ImportError:
+        HAS_XLA = False
     print("Learn", position)
-    if flags.training_device != "cpu":
-        device = torch.device('cuda:' + str(flags.training_device))
-    else:
-        device = torch.device('cpu')
+    device = get_torch_device(flags.training_device)
     obs_x = batch["obs_x_batch"]
     obs_x = torch.flatten(obs_x, 0, 1).to(device)
     obs_z = torch.flatten(batch['obs_z'].to(device), 0, 1).float()
@@ -49,9 +52,11 @@ def learn(position, actor_models, model, batch, optimizer, flags, lock):
     target_wp_bid = torch.flatten(batch['target_wp_bid'].to(device), 0, 1)
     episode_returns = batch['episode_return'][batch['done']]
     if len(episode_returns) > 0:
-        mean_episode_return_buf[position].append(torch.mean(episode_returns).to(device))
+        mean_episode_return_buf[position].append(
+            torch.mean(episode_returns).to(device))
     with lock:
-        win_rate, win, lose = model.forward(obs_z, obs_x, return_value=True)['values']
+        win_rate, win, lose = model.forward(
+            obs_z, obs_x, return_value=True)['values']
 
         if position in ["landlord", "landlord_up", "landlord_down"]:
             loss1 = compute_loss(win_rate, target_wp)
@@ -61,8 +66,10 @@ def learn(position, actor_models, model, batch, optimizer, flags, lock):
             loss = loss1 + loss2
         else:
             loss1 = compute_loss_bid(win_rate, target_wp_bid)
-            l_w = compute_loss_(win, target_adp) * torch.abs(target_wp) * (1. + target_wp) / 2.
-            l_l = compute_loss_(lose, target_adp) * torch.abs(target_wp) * (1. - target_wp) / 2.
+            l_w = compute_loss_(win, target_adp) * \
+                torch.abs(target_wp) * (1. + target_wp) / 2.
+            l_l = compute_loss_(lose, target_adp) * \
+                torch.abs(target_wp) * (1. - target_wp) / 2.
             loss2 = l_w.mean() + l_l.mean()
             loss = loss1 + loss2
 
@@ -76,6 +83,9 @@ def learn(position, actor_models, model, batch, optimizer, flags, lock):
         nn.utils.clip_grad_norm_(model.parameters(), flags.max_grad_norm)
         optimizer.step()
 
+        if HAS_XLA and flags.training_device == 'tpu':
+            xm.mark_step()
+
         for actor_model in actor_models.values():
             actor_model.get_model(position).load_state_dict(model.state_dict())
         return stats
@@ -88,7 +98,14 @@ def train(flags):
     Then it will start subprocesses as actors. Then, it will call
     learning function with  multiple threads.
     """
-    if not flags.actor_device_cpu or flags.training_device != 'cpu':
+    from .device_utils import is_tpu_available, get_map_location
+    if flags.training_device == 'tpu':
+        if not is_tpu_available():
+            raise AssertionError(
+                "TPU not available. Please run on a TPU-enabled environment or use CPU/GPU.")
+        # TPU training: actors must run on CPU since share_memory() is not supported on TPU
+        flags.actor_device_cpu = True
+    elif not flags.actor_device_cpu or flags.training_device != 'cpu':
         if not torch.cuda.is_available():
             raise AssertionError(
                 "CUDA not available. If you have GPUs, please specify the ID after `--gpu_devices`. Otherwise, please train with CPU with `python3 train.py --actor_device_cpu --training_device cpu`")
@@ -150,20 +167,24 @@ def train(flags):
         'loss_landlord_down',
     ]
     frames, stats = 0, {k: 0 for k in stat_keys}
-    position_frames = {'first': 0, 'second': 0, 'third': 0, 'landlord': 0, 'landlord_up': 0, 'landlord_down': 0}
+    position_frames = {'first': 0, 'second': 0, 'third': 0,
+                       'landlord': 0, 'landlord_up': 0, 'landlord_down': 0}
 
     # Load models if any
     if flags.load_model and os.path.exists(checkpointpath):
         checkpoint_states = torch.load(
             checkpointpath,
-            map_location=("cuda:" + str(flags.training_device) if flags.training_device != "cpu" else "cpu")
+            map_location=get_map_location(flags.training_device)
         )
 
         for k in ['first', 'second', 'third', 'landlord', 'landlord_up', 'landlord_down']:
-            learner_model.get_model(k).load_state_dict(checkpoint_states["model_state_dict"][k])
-            optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
+            learner_model.get_model(k).load_state_dict(
+                checkpoint_states["model_state_dict"][k])
+            optimizers[k].load_state_dict(
+                checkpoint_states["optimizer_state_dict"][k])
             for device in device_iterator:
-                models[device].get_model(k).load_state_dict(checkpoint_states["model_state_dict"][k])
+                models[device].get_model(k).load_state_dict(
+                    checkpoint_states["model_state_dict"][k])
         stats = checkpoint_states["stats"]
         frames = checkpoint_states["frames"]
         position_frames = checkpoint_states["position_frames"]
@@ -173,7 +194,8 @@ def train(flags):
         """Thread target for the learning process."""
         nonlocal frames, position_frames, stats
         while frames < flags.total_frames:
-            batch = get_batch(batch_queues[device][position], position, flags, local_lock)
+            batch = get_batch(
+                batch_queues[device][position], position, flags, local_lock)
             _stats = learn(position, models, learner_model.get_model(position), batch,
                            optimizers[position], flags, position_lock)
             with lock:
@@ -216,9 +238,10 @@ def train(flags):
     def checkpoint(frames):
         if flags.disable_checkpoint:
             return
+        from .device_utils import save_checkpoint
         log.info('Saving checkpoint to %s', checkpointpath)
         _models = learner_model.get_models()
-        torch.save({
+        save_checkpoint({
             'model_state_dict': {k: _models[k].state_dict() for k in _models},
             'optimizer_state_dict': {k: optimizers[k].state_dict() for k in optimizers},
             "stats": stats,
@@ -231,7 +254,8 @@ def train(flags):
         for position in ['first', 'second', 'third', 'landlord', 'landlord_up', 'landlord_down']:
             model_weights_dir = os.path.expandvars(os.path.expanduser(
                 '%s/%s/%s' % (flags.savedir, flags.xpid, position + '_' + str(frames) + '.ckpt')))
-            torch.save(learner_model.get_model(position).state_dict(), model_weights_dir)
+            save_checkpoint(learner_model.get_model(
+                position).state_dict(), model_weights_dir)
 
     fps_log = []
     timer = timeit.default_timer
@@ -239,7 +263,8 @@ def train(flags):
         last_checkpoint_time = timer() - flags.save_interval * 60
         while frames < flags.total_frames:
             start_frames = frames
-            position_start_frames = {k: position_frames[k] for k in position_frames}
+            position_start_frames = {
+                k: position_frames[k] for k in position_frames}
             start_time = timer()
             time.sleep(5)
 

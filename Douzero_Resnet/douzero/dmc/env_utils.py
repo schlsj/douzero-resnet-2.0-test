@@ -5,18 +5,19 @@ the environment, we do it automatically.
 """
 import numpy as np
 import torch
+from douzero.env import Env
+
 
 def _format_observation(obs, device):
     """
     A utility function to process observations and
-    move them to CUDA.
+    move them to the target device (CPU, GPU, or TPU).
     """
+    from .device_utils import get_torch_device
     position = obs['position']
-    if not device == "cpu":
-        device = 'cuda:' + str(device)
-    device = torch.device(device)
-    x_batch = torch.from_numpy(obs['x_batch']).to(device)
-    z_batch = torch.from_numpy(obs['z_batch']).to(device)
+    torch_device = get_torch_device(device)
+    x_batch = torch.from_numpy(obs['x_batch']).to(torch_device)
+    z_batch = torch.from_numpy(obs['z_batch']).to(torch_device)
     x_no_action = torch.from_numpy(obs['x_no_action'])
     z = torch.from_numpy(obs['z'])
     obs = {'x_batch': x_batch,
@@ -25,17 +26,19 @@ def _format_observation(obs, device):
            }
     return position, obs, x_no_action, z
 
+
 class Environment:
     def __init__(self, env, device):
         """ Initialzie this environment wrapper
         """
-        self.env = env
+        self.env: Env = env
         self.device = device
         self.episode_return = None
 
     def initial(self, model, device, flags=None):
         obs = self.env.reset(model, device, flags=flags)
-        initial_position, initial_obs, x_no_action, z = _format_observation(obs, self.device)
+        initial_position, initial_obs, x_no_action, z = _format_observation(
+            obs, self.device)
         initial_reward = torch.zeros(1, 1)
         self.episode_return = torch.zeros(1, 1)
         initial_done = torch.ones(1, 1, dtype=torch.bool)
